@@ -906,9 +906,9 @@
       const month = new Date().toISOString().slice(0, 7);
       const monthCount = data.news.filter(n => (n.date || '').slice(0,7) === month).length;
       return `<div class="panel">
-        <div class="section-head"><div><h2>Экономический календарь</h2><div class="muted">Бесплатный источник: Finance Calendar API · без ключа · время Узбекистана</div></div><button class="primary" onclick="refreshOnlineNews()">⟳ Обновить новости на неделю</button></div>
-        <div class="row"><div style="flex:2"><label>Источник новостей</label><select id="newsProvider" onchange="setNewsProvider(this.value)"><option value="financecalendar" ${(data.settings?.newsProvider||'financecalendar')==='financecalendar'?'selected':''}>Автоматически — Finance Calendar</option><option value="manual" ${(data.settings?.newsProvider||'financecalendar')==='manual'?'selected':''}>Только ручная загрузка</option></select></div><div style="flex:3;align-self:end" class="muted">Автоновости можно отключить в любой момент. Ручной импорт останется доступен.</div></div>
-        <div class="muted" style="margin-top:8px">Источник и лицензия: <a href="https://www.financecalendar.com/api/forex-calendar/" target="_blank" rel="noopener">FinanceCalendar.com</a>. Календарь охватывает основные публикации по основным валютам; сверяй важные события с официальным источником.</div>
+        <div class="section-head"><div><h2>Экономический календарь</h2><div class="muted">Бесплатный источник: Forex Factory · без API-ключа · время Узбекистана</div></div><button class="primary" onclick="refreshOnlineNews()">⟳ Обновить новости на неделю</button></div>
+        <div class="row"><div style="flex:2"><label>Источник новостей</label><select id="newsProvider" onchange="setNewsProvider(this.value)"><option value="forexfactory" ${(!data.settings?.newsProvider || data.settings?.newsProvider==='forexfactory' || data.settings?.newsProvider==='financecalendar')?'selected':''}>Автоматически — Forex Factory</option><option value="manual" ${(data.settings?.newsProvider||'financecalendar')==='manual'?'selected':''}>Только ручная загрузка</option></select></div><div style="flex:3;align-self:end" class="muted">Автоновости можно отключить в любой момент. Ручной импорт останется доступен.</div></div>
+        <div class="muted" style="margin-top:8px">Источник: <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">Forex Factory</a> (публичная недельная лента Fair Economy). Лента охватывает текущую неделю; фактические значения после публикации в ней могут отсутствовать. Время отображается по Узбекистану.</div>
       </div>
       <div class="section-head"><div><h2>Новости на неделю</h2><div class="muted">Онлайн-обновление добавляет события по датам. Можно удалить автоновости или перейти на ручной режим.</div></div><div class="row" style="flex:0 1 auto"><button class="primary" onclick="document.getElementById('newsFile').click()">Загрузить файл календаря</button><button onclick="importBulkNews()">Вставить списком</button><button class="danger" onclick="removeOnlineNews()">Удалить автоновости</button></div></div>
       <input id="newsFile" class="hide" type="file" accept=".csv,.txt,.json,text/csv,text/plain,application/json" onchange="importNewsFile(event)">
@@ -982,39 +982,64 @@
     }
 
     async function refreshOnlineNews() {
-      if ((data.settings?.newsProvider || 'financecalendar') !== 'financecalendar') {
-        toast('Выбран ручной режим. Выбери автоматический источник в списке.'); return;
+      const provider = data.settings?.newsProvider || 'forexfactory';
+      if (provider === 'manual') {
+        toast('Выбран ручной режим. Выбери автоматический источник в списке.');
+        return;
       }
       const btn = [...document.querySelectorAll('button')].find(b => b.textContent.includes('Обновить новости на неделю'));
       if (btn) { btn.disabled = true; btn.textContent = 'Загружаю…'; }
       try {
-        const url = 'https://www.financecalendar.com/wp-json/fc/v1/week?which=this&impact=high,medium&country=US,GB,EU,DE,JP,CA,AU,CN,CH,NZ,NO,SE,IN,HK&tz=Asia%2FTashkent';
+        // Публичная недельная JSON-лента Forex Factory / Fair Economy — без API-ключа.
+        const url = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
         const response = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const payload = await response.json();
-        const events = Array.isArray(payload) ? payload : (payload.events || payload.data || []);
-        if (!events.length) throw new Error('Источник не вернул события');
-        const existingOther = (data.news || []).filter(n => n.source !== 'financecalendar');
-        const oldOnline = (data.news || []).filter(n => n.source === 'financecalendar');
+        const events = await response.json();
+        if (!Array.isArray(events) || !events.length) throw new Error('Источник не вернул события');
+
+        const dateTimeParts = (value) => {
+          const dt = new Date(value);
+          if (Number.isNaN(dt.getTime())) return null;
+          const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit',
+            day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+          }).formatToParts(dt);
+          const get = type => parts.find(p => p.type === type)?.value || '';
+          return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
+        };
+
         const mapped = events.map(e => {
-          const stamp = e.time_local || e.time_utc || e.release_at_utc || e.timestamp || '';
-          const date = e.date || String(stamp).slice(0,10);
-          let time = e.time_local || '';
-          if (!time && stamp) { const m = String(stamp).match(/T(\d{2}:\d{2})/); if (m) time = m[1]; }
-          const impact = String(e.impact || 'medium').toLowerCase();
-          const title = e.title || e.name || e.series_name || 'Экономическое событие';
-          const currency = e.currency || e.country || '';
-          const sourceUrl = e.source_url || e.url || 'https://www.financecalendar.com/api/forex-calendar/';
-          return { id: id(), date, time, impact: ['high','medium','low'].includes(impact) ? impact : 'medium', title: currency ? `${currency} · ${title}` : title, url: sourceUrl, source: 'financecalendar' };
-        }).filter(n => /^\d{4}-\d{2}-\d{2}$/.test(n.date));
-        if (!mapped.length) throw new Error('Не удалось распознать формат событий');
-        const freshKeys = new Set(mapped.map(n => `${n.date}|${n.time}|${n.title}`));
-        data.news = [...existingOther, ...mapped];
-        persist(); render();
-        toast(`Загружено событий на неделю: ${mapped.length}`);
+          const local = dateTimeParts(e.date);
+          if (!local) return null;
+          const rawImpact = String(e.impact || '').toLowerCase();
+          const impact = rawImpact === 'high' ? 'high' :
+                         rawImpact === 'medium' ? 'medium' :
+                         rawImpact === 'low' ? 'low' : 'low';
+          const currency = String(e.country || '').trim();
+          const title = String(e.title || e.event || 'Экономическое событие').trim();
+          return {
+            id: id(), date: local.date, time: local.time, impact,
+            title: currency ? `${currency} · ${title}` : title,
+            url: 'https://www.forexfactory.com/calendar',
+            source: 'forexfactory'
+          };
+        }).filter(n => n && ['high', 'medium'].includes(n.impact));
+
+        if (!mapped.length) throw new Error('На текущую неделю нет событий высокой или средней важности');
+        const manualNews = (data.news || []).filter(n => !['financecalendar', 'forexfactory'].includes(n.source));
+        const unique = new Map();
+        mapped.forEach(n => unique.set(`${n.date}|${n.time}|${n.title}`, n));
+        data.news = [...manualNews, ...unique.values()];
+        data.settings.newsProvider = 'forexfactory';
+        persist();
+        render();
+        toast(`Загружено событий на неделю: ${unique.size}`);
       } catch (err) {
         console.error('Online news error:', err);
-        toast('Онлайн-загрузка не удалась. Проверь интернет или используй ручной импорт.');
+        const message = String(err?.message || err);
+        toast(message.includes('HTTP') ?
+          `Источник новостей ответил ошибкой: ${message}` :
+          'Не удалось загрузить ленту. Возможно, источник временно недоступен или браузер блокирует запрос.');
       } finally {
         const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('Загружаю…'));
         if (b) { b.disabled = false; b.textContent = '⟳ Обновить новости на неделю'; }
@@ -1022,10 +1047,10 @@
     }
 
     function removeOnlineNews() {
-      const count = (data.news || []).filter(n => n.source === 'financecalendar').length;
+      const count = (data.news || []).filter(n => ['financecalendar', 'forexfactory'].includes(n.source)).length;
       if (!count) { toast('Автоматических новостей нет'); return; }
       if (!confirm(`Удалить ${count} новостей, загруженных автоматически? Ручные новости останутся.`)) return;
-      data.news = data.news.filter(n => n.source !== 'financecalendar');
+      data.news = data.news.filter(n => !['financecalendar', 'forexfactory'].includes(n.source));
       persist(); render(); toast('Автоновости удалены. Ручные новости сохранены.');
     }
 
