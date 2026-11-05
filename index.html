@@ -906,9 +906,9 @@
       const month = new Date().toISOString().slice(0, 7);
       const monthCount = data.news.filter(n => (n.date || '').slice(0,7) === month).length;
       return `<div class="panel">
-        <div class="section-head"><div><h2>Экономический календарь</h2><div class="muted">Бесплатный источник: Forex Factory · без API-ключа · время Узбекистана</div></div><button class="primary" onclick="refreshOnlineNews()">⟳ Обновить новости на неделю</button></div>
-        <div class="row"><div style="flex:2"><label>Источник новостей</label><select id="newsProvider" onchange="setNewsProvider(this.value)"><option value="forexfactory" ${(!data.settings?.newsProvider || data.settings?.newsProvider==='forexfactory' || data.settings?.newsProvider==='financecalendar')?'selected':''}>Автоматически — Forex Factory</option><option value="manual" ${(data.settings?.newsProvider||'financecalendar')==='manual'?'selected':''}>Только ручная загрузка</option></select></div><div style="flex:3;align-self:end" class="muted">Автоновости можно отключить в любой момент. Ручной импорт останется доступен.</div></div>
-        <div class="muted" style="margin-top:8px">Источник: <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">Forex Factory</a> (публичная недельная лента Fair Economy). Лента охватывает текущую неделю; фактические значения после публикации в ней могут отсутствовать. Время отображается по Узбекистану.</div>
+        <div class="section-head"><div><h2>Экономический календарь</h2><div class="muted">Бесплатный источник: PipAtlas · без API-ключа · время Узбекистана</div></div><button class="primary" onclick="refreshOnlineNews()">⟳ Обновить новости на неделю</button></div>
+        <div class="row"><div style="flex:2"><label>Источник новостей</label><select id="newsProvider" onchange="setNewsProvider(this.value)"><option value="pipatlas" ${(!data.settings?.newsProvider || ['forexfactory','financecalendar','pipatlas'].includes(data.settings?.newsProvider))?'selected':''}>Автоматически — PipAtlas</option><option value="manual" ${(data.settings?.newsProvider||'financecalendar')==='manual'?'selected':''}>Только ручная загрузка</option></select></div><div style="flex:3;align-self:end" class="muted">Автоновости можно отключить в любой момент. Ручной импорт останется доступен.</div></div>
+        <div class="muted" style="margin-top:8px">Источник: <a href="https://pipatlas.com/api-docs" target="_blank" rel="noopener">PipAtlas API</a>. Недельный календарь, прогноз, предыдущие и фактические значения (если опубликованы). Время отображается по Узбекистану.</div>
       </div>
       <div class="section-head"><div><h2>Новости на неделю</h2><div class="muted">Онлайн-обновление добавляет события по датам. Можно удалить автоновости или перейти на ручной режим.</div></div><div class="row" style="flex:0 1 auto"><button class="primary" onclick="document.getElementById('newsFile').click()">Загрузить файл календаря</button><button onclick="importBulkNews()">Вставить списком</button><button class="danger" onclick="removeOnlineNews()">Удалить автоновости</button></div></div>
       <input id="newsFile" class="hide" type="file" accept=".csv,.txt,.json,text/csv,text/plain,application/json" onchange="importNewsFile(event)">
@@ -982,7 +982,7 @@
     }
 
     async function refreshOnlineNews() {
-      const provider = data.settings?.newsProvider || 'forexfactory';
+      const provider = data.settings?.newsProvider || 'pipatlas';
       if (provider === 'manual') {
         toast('Выбран ручной режим. Выбери автоматический источник в списке.');
         return;
@@ -990,11 +990,15 @@
       const btn = [...document.querySelectorAll('button')].find(b => b.textContent.includes('Обновить новости на неделю'));
       if (btn) { btn.disabled = true; btn.textContent = 'Загружаю…'; }
       try {
-        // Публичная недельная JSON-лента Forex Factory / Fair Economy — без API-ключа.
-        const url = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
-        const response = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+        // PipAtlas: недельный JSON-календарь с открытым CORS, без API-ключа.
+        const url = 'https://pipatlas.com/api/calendar';
+        const response = await fetch(url, {
+          headers: { 'Accept': 'application/json' },
+          cache: 'default'
+        });
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const events = await response.json();
+        const payload = await response.json();
+        const events = Array.isArray(payload) ? payload : payload.events;
         if (!Array.isArray(events) || !events.length) throw new Error('Источник не вернул события');
 
         const dateTimeParts = (value) => {
@@ -1009,37 +1013,44 @@
         };
 
         const mapped = events.map(e => {
-          const local = dateTimeParts(e.date);
+          const local = dateTimeParts(e.date || e.datetime);
           if (!local) return null;
           const rawImpact = String(e.impact || '').toLowerCase();
           const impact = rawImpact === 'high' ? 'high' :
                          rawImpact === 'medium' ? 'medium' :
                          rawImpact === 'low' ? 'low' : 'low';
-          const currency = String(e.country || '').trim();
-          const title = String(e.title || e.event || 'Экономическое событие').trim();
+          const currency = String(e.currency || e.country || '').trim();
+          const title = String(e.name || e.title || e.event || 'Экономическое событие').trim();
           return {
             id: id(), date: local.date, time: local.time, impact,
             title: currency ? `${currency} · ${title}` : title,
-            url: 'https://www.forexfactory.com/calendar',
-            source: 'forexfactory'
+            url: e.url || 'https://pipatlas.com/',
+            source: 'pipatlas',
+            actual: e.actual || '',
+            forecast: e.forecast || '',
+            previous: e.previous || ''
           };
         }).filter(n => n && ['high', 'medium'].includes(n.impact));
 
         if (!mapped.length) throw new Error('На текущую неделю нет событий высокой или средней важности');
-        const manualNews = (data.news || []).filter(n => !['financecalendar', 'forexfactory'].includes(n.source));
+        const manualNews = (data.news || []).filter(n => !['financecalendar', 'forexfactory', 'pipatlas'].includes(n.source));
         const unique = new Map();
         mapped.forEach(n => unique.set(`${n.date}|${n.time}|${n.title}`, n));
         data.news = [...manualNews, ...unique.values()];
-        data.settings.newsProvider = 'forexfactory';
+        data.settings.newsProvider = 'pipatlas';
         persist();
         render();
-        toast(`Загружено событий на неделю: ${unique.size}`);
+        if (payload.stale === true) {
+          toast(`Загружено событий: ${unique.size}. Источник отдал сохранённую копию календаря.`);
+        } else {
+          toast(`Загружено событий на неделю: ${unique.size}`);
+        }
       } catch (err) {
         console.error('Online news error:', err);
         const message = String(err?.message || err);
         toast(message.includes('HTTP') ?
           `Источник новостей ответил ошибкой: ${message}` :
-          'Не удалось загрузить ленту. Возможно, источник временно недоступен или браузер блокирует запрос.');
+          'Не удалось загрузить календарь PipAtlas. Возможно, источник временно недоступен.');
       } finally {
         const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('Загружаю…'));
         if (b) { b.disabled = false; b.textContent = '⟳ Обновить новости на неделю'; }
@@ -1047,10 +1058,10 @@
     }
 
     function removeOnlineNews() {
-      const count = (data.news || []).filter(n => ['financecalendar', 'forexfactory'].includes(n.source)).length;
+      const count = (data.news || []).filter(n => ['financecalendar', 'forexfactory', 'pipatlas'].includes(n.source)).length;
       if (!count) { toast('Автоматических новостей нет'); return; }
       if (!confirm(`Удалить ${count} новостей, загруженных автоматически? Ручные новости останутся.`)) return;
-      data.news = data.news.filter(n => !['financecalendar', 'forexfactory'].includes(n.source));
+      data.news = data.news.filter(n => !['financecalendar', 'forexfactory', 'pipatlas'].includes(n.source));
       persist(); render(); toast('Автоновости удалены. Ручные новости сохранены.');
     }
 
