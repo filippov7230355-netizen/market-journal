@@ -612,7 +612,7 @@
     }
 
     function monthlyStatsGrid() {
-      return `<div class="grid">${monthlyRows().filter(m=>m.days>0).map(m=>`<div class="card" role="button" tabindex="0" style="margin:0;cursor:pointer" onclick="openStatsMonth('${m.key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStatsMonth('${m.key}')}"><div class="row"><div class="muted">${esc(m.label)}</div><span class="muted">Открыть →</span></div><div class="pnlBadge ${statusClass(m.pnl)}">${m.pnl>0?'+':''}${m.pnl.toFixed(2)} ${esc(data.settings.currency||'USD')}</div><div class="muted" style="margin-top:7px">Дней: ${m.days} · Плюсовых: ${m.positive} · Минусовых: ${m.negative}</div>${sparkline((()=>{let vals=[];data.weeks.forEach(w=>(w.days||[]).forEach(d=>{if((d.date||'').slice(0,7)===m.key)vals.push(Number(d.pnl)||0)}));return vals})(),220,45)}</div>`).join('')}</div>`;
+      return `<div class="grid">${monthlyRows().map(m=>`<div class="card" role="button" tabindex="0" style="margin:0;cursor:pointer" onclick="openStatsMonth('${m.key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openStatsMonth('${m.key}')}"><div class="row"><div class="muted">${esc(m.label)}</div><span class="muted">Открыть →</span></div><div class="pnlBadge ${statusClass(m.pnl)}">${m.pnl>0?'+':''}${m.pnl.toFixed(2)} ${esc(data.settings.currency||'USD')}</div><div class="muted" style="margin-top:7px">Дней: ${m.days} · Плюсовых: ${m.positive} · Минусовых: ${m.negative}</div>${sparkline((()=>{let vals=[];data.weeks.forEach(w=>(w.days||[]).forEach(d=>{if((d.date||'').slice(0,7)===m.key)vals.push(Number(d.pnl)||0)}));return vals})(),220,45)}</div>`).join('')}</div>`;
     }
         function equityCurve(rows) {
       let cumulative = 0;
