@@ -130,7 +130,12 @@
       padding: 12px; margin-top: 10px; background: #08151e; position: relative;
     }
     .upload input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .newsAlert { border: 1px solid rgba(255,92,92,.65); background: rgba(255,40,40,.07); border-radius: 14px; padding: 16px; margin: 18px 0; }
+    .newsAlert { border: 1px solid rgba(255,92,92,.75); background: rgba(255,40,40,.10); border-radius: 14px; padding: 16px; margin: 18px 0; }
+    .newsAlert.medium { border-color: rgba(255,190,70,.75); background: rgba(255,170,35,.09); }
+    .newsAlert h3 { margin: 0; color: #ff9cac; }
+    .newsAlert.medium h3 { color: #ffd27a; }
+    .news-event { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.10); }
+    .news-event:last-child { border-bottom: 0; }
     .toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
       z-index: 200; background: #113b42; border: 1px solid var(--cyan);
@@ -540,11 +545,42 @@
     function removeBacktestImage(pid,eid,ix){deleteBacktestPhoto(pid,eid,ix);}
     function openBacktestImage(pid,eid,ix){const p=(data.backtestProjects||[]).find(x=>x.id===pid),e=p?.entries?.find(x=>x.id===eid);if(!e)return;const modal=document.getElementById('imageModal');document.getElementById('imageModalImg').src=e.images[ix]||'';modal.style.display='flex';}
 
+    function tashkentDateKey() {
+      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+      const get = type => parts.find(p => p.type === type)?.value || '';
+      return `${get('year')}-${get('month')}-${get('day')}`;
+    }
+
+    function isUsdNews(n) {
+      const currency = String(n.currency || '').trim().toUpperCase();
+      const title = String(n.title || '');
+      return currency === 'USD' || /^USD\s*[·:–-]/i.test(title) || /\bUSD\b/i.test(title);
+    }
+
+    function usdNewsForDate(date) {
+      return (data.news || []).filter(n => n.date === date && isUsdNews(n) && ['high', 'medium'].includes(String(n.impact || 'high').toLowerCase()))
+        .sort((a,b) => (a.time || '').localeCompare(b.time || ''));
+    }
+
+    function usdNewsAlert(date, heading) {
+      const events = usdNewsForDate(date);
+      if (!events.length) return '';
+      const hasHigh = events.some(n => String(n.impact || 'high').toLowerCase() === 'high');
+      const tone = hasHigh ? '' : ' medium';
+      const title = hasHigh ? '⚠ СИЛЬНЫЕ НОВОСТИ USD — ЛУЧШЕ НЕ ТОРГОВАТЬ' : '⚠ НОВОСТИ USD — ПОВЫШЕННАЯ ОСТОРОЖНОСТЬ';
+      return `<section class="newsAlert${tone}">
+        <div class="row"><div><h3>${title}</h3><div class="muted" style="margin-top:4px">${esc(heading)} · XAUUSD может резко двигаться на публикациях</div></div><button onclick="go('news')">Календарь →</button></div>
+        ${events.map(n => `<div class="news-event"><b>${esc(n.time || 'Время не указано')} · ${esc(n.title || 'Экономическое событие')}</b><div class="muted">${String(n.impact || 'high').toLowerCase() === 'high' ? 'Высокая важность — воздержаться от входов вблизи публикации' : 'Средняя важность — торговать с осторожностью'}</div></div>`).join('')}
+      </section>`;
+    }
+
     function homeView() {
+      const today = tashkentDateKey();
       return `<div class="section-head">
         <div><h2>${esc(data.settings.journalName || 'Рабочее пространство')}</h2><div class="muted">Активы, торговые недели и месячная статистика</div></div>
         <button class="primary" onclick="addWeek()">＋ Новая неделя</button>
       </div>
+      ${usdNewsAlert(today, 'Сегодня по времени Узбекистана')}
       ${tradingSessionsView()}
       <div class="grid">${data.assets.filter(a => !a.archived).map(a => {
         let ws = data.weeks.filter(w => w.assetId === a.id);
@@ -753,10 +789,6 @@
 
     function openDay(w, d) { weekId = w; dayId = d; page = 'day'; render(); }
 
-    function dayStrongNews(d) {
-      return d?.date ? (data.news || []).filter(n => (n.date || '') === d.date && (n.impact || 'high') === 'high') : [];
-    }
-
     function dayView() {
       let d = getDay(), w = getWeek(); if (!d || !w) return homeView();
       return `<div class="section-head">
@@ -783,10 +815,7 @@
           <div style="flex:2"><label>План дня</label><input value="${esc(d.plan || '')}" placeholder="Ожидаю реакцию..." oninput="updateDay('${d.id}','plan',this.value,false)"></div>
         </div>
       </div>
-      ${dayStrongNews(d).length ? `<section class="newsAlert">
-        <div class="row"><h3>⚠ СИЛЬНЫЕ НОВОСТИ НА СЕГОДНЯ</h3><button onclick="go('news')">Открыть календарь →</button></div>
-        ${dayStrongNews(d).map(n => `<div style="padding:7px 0;border-bottom:1px solid #66333c"><b>${esc(n.time || "")} · ${esc(n.title || "")}</b> ${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener" style="color:#ff9cac;margin-left:8px">Открыть новость ↗</a>` : ''}</div>`).join('')}
-      </section>` : ''}
+      ${usdNewsAlert(d.date, 'События на выбранную дату · время Узбекистана')}
       <div class="section-head"><h2>Графики по таймфреймам</h2><button class="primary" onclick="addTF()">＋ Добавить график</button></div>
       <div id="tfList">${d.tfs.map((t, i) => tfView(t, i)).join('')}</div>
       <section class="panel">
@@ -981,7 +1010,7 @@
       toast(value === 'manual' ? 'Автоматический источник отключён. Ручной импорт доступен.' : 'Автоматический источник выбран. Нажми «Обновить новости на неделю».');
     }
 
-    async function refreshOnlineNews() {
+    async function refreshOnlineNews(silent = false) {
       const provider = data.settings?.newsProvider || 'pipatlas';
       if (provider === 'manual') {
         toast('Выбран ручной режим. Выбери автоматический источник в списке.');
@@ -1024,6 +1053,7 @@
           return {
             id: id(), date: local.date, time: local.time, impact,
             title: currency ? `${currency} · ${title}` : title,
+            currency,
             url: e.url || 'https://pipatlas.com/',
             source: 'pipatlas',
             actual: e.actual || '',
@@ -1040,15 +1070,14 @@
         data.settings.newsProvider = 'pipatlas';
         persist();
         render();
-        if (payload.stale === true) {
-          toast(`Загружено событий: ${unique.size}. Источник отдал сохранённую копию календаря.`);
-        } else {
-          toast(`Загружено событий на неделю: ${unique.size}`);
+        if (!silent) {
+          if (payload.stale === true) toast(`Загружено событий: ${unique.size}. Источник отдал сохранённую копию календаря.`);
+          else toast(`Загружено событий на неделю: ${unique.size}`);
         }
       } catch (err) {
         console.error('Online news error:', err);
         const message = String(err?.message || err);
-        toast(message.includes('HTTP') ?
+        if (!silent) toast(message.includes('HTTP') ?
           `Источник новостей ответил ошибкой: ${message}` :
           'Не удалось загрузить календарь PipAtlas. Возможно, источник временно недоступен.');
       } finally {
@@ -1174,6 +1203,8 @@
     window.onload = function() {
       applyAppearance();
     render();
+    // При открытии журнала тихо обновляем календарь, чтобы предупреждения были актуальными.
+    if ((data.settings?.newsProvider || 'pipatlas') !== 'manual') refreshOnlineNews(true);
       updateTradingSessions();
       setInterval(updateTradingSessions, 1000);
     };
