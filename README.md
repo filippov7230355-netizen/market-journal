@@ -1,0 +1,2 @@
+# market-journal
+Trading journal
